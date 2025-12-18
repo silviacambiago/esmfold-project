@@ -10,14 +10,12 @@ Pipeline:
     - pseudo log-likelihood (PLL): sum_i log p(x_i | x_{-i}) via masking
     - avg_log_prob = PLL / L
     - pseudo-perplexity = exp(-avg_log_prob)
-    - an ESM2 embedding (mean over residues)
 - For each mutant, also computes mutation LLR vs the WT sequence:
     - LLR = sum over mutated positions i of
         [ log p(mut_aa_i | WT context, position i masked)
         - log p(wt_aa_i  | WT context, position i masked) ]
 - Writes:
-    - tests/esm2_scores/esm2_scores.tsv (one row per variant)
-    - tests/esm2_scores/embeddings/<variant_id>.npy
+    - tests/esm2_scores/esm2_scores.csv (same info + sequence column)
 """
 import os
 import re
@@ -25,20 +23,18 @@ import math
 import warnings
 from pathlib import Path
 from typing import Dict, List, Tuple, Optional
-import numpy as np
+import time
+
 import torch
 import esm
 
 
-FASTA_DIR = Path("esm2_fasta")
-OUTDIR = Path("tests/esm2_scores")
-EMB_DIR = OUTDIR / "embeddings"
+FASTA_DIR = Path("ubiquitin_mutants_kstep")
+OUTDIR = Path("tests/esm2_ubiquitin_multi")
 
 OUTDIR.mkdir(parents=True, exist_ok=True)
-EMB_DIR.mkdir(parents=True, exist_ok=True)
 
 ESM_MODEL = "esm2_t33_650M_UR50D"
-BATCH_SIZE_EMB = 4   # for embeddings
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 warnings.filterwarnings("ignore", message=".*libomp.dll.*")
 
@@ -51,6 +47,7 @@ def read_fasta_seq(path: Path) -> str:
     )
     seq = re.sub(r"\s+", "", seq).upper()
     return seq
+
 
 def list_fasta_files(fasta_dir: Path) -> List[Path]:
     return sorted(list(fasta_dir.glob("*.fasta")))
@@ -207,50 +204,8 @@ def mutation_llr_vs_wt(
     return float(llr), diff_positions
 
 
-def embed_sequences(
-    seq_items: List[Tuple[str, str]],
-    model,
-    alphabet,
-    batch_converter,
-    device: str
-) -> Dict[str, np.ndarray]:
-    """
-    seq_items: list of (variant_id, seq)
-    Returns dict {variant_id: embedding}, where embedding = mean over residue representations.
-    """
-    name_to_vec: Dict[str, np.ndarray] = {}
-
-    if not seq_items:
-        return name_to_vec
-
-    with torch.no_grad():
-        for i in range(0, len(seq_items), BATCH_SIZE_EMB):
-            chunk = seq_items[i:i + BATCH_SIZE_EMB]
-            if not chunk:
-                continue
-
-            batch_data = [(vid, seq) for vid, seq in chunk]
-            _, _, toks = batch_converter(batch_data)
-            toks = toks.to(device)
-
-            layer = 33
-            out = model(
-                toks,
-                repr_layers=[layer],
-                return_contacts=False
-            )
-            reps = out["representations"][layer]
-
-            for row_idx, (vid, seq) in enumerate(chunk):
-                L = len(seq)
-                rep = reps[row_idx, 1:1+L, :]
-                vec = rep.mean(dim=0).cpu().numpy()
-                name_to_vec[vid] = vec
-
-    return name_to_vec
-
-
 def main():
+    t0 = time.perf_counter()
     fasta_files = list_fasta_files(FASTA_DIR)
     if not fasta_files:
         raise RuntimeError(f"No FASTA files found in {FASTA_DIR!s}")
@@ -274,24 +229,7 @@ def main():
     model, alphabet, batch_converter, device, mask_idx = load_esm2()
     print(f"Model: {ESM_MODEL} | Device: {device}")
 
-    seq_items: List[Tuple[str, str]] = []
-
-    for base_id, (vid_wt, seq_wt) in wt_map.items():
-        seq_items.append((vid_wt, seq_wt))
-        for vid_mut, seq_mut in mut_map.get(base_id, []):
-            seq_items.append((vid_mut, seq_mut))
-
-    for base_id, mut_list in mut_map.items():
-        if base_id in wt_map:
-            continue
-        for vid_mut, seq_mut in mut_list:
-            seq_items.append((vid_mut, seq_mut))
-
-    print("Computing embeddings for all variants...")
-    emb_dict = embed_sequences(seq_items, model, alphabet, batch_converter, device)
-
-    for vid, vec in emb_dict.items():
-        np.save(EMB_DIR / f"{vid}.npy", vec)
+    # (Embedding generation block removed)
 
     rows = []
     print("Computing PLL / PPL and mutation LLRs...")
@@ -303,6 +241,7 @@ def main():
         rows.append({
             "base_id": base_id,
             "variant_id": wt_vid,
+            "sequence": wt_seq,
             "is_wt": 1,
             "length": len(wt_seq),
             "log_pseudo_likelihood": pll_wt,
@@ -323,6 +262,7 @@ def main():
             rows.append({
                 "base_id": base_id,
                 "variant_id": mut_vid,
+                "sequence": mut_seq,
                 "is_wt": 0,
                 "length": len(mut_seq),
                 "log_pseudo_likelihood": pll_mut,
@@ -330,7 +270,7 @@ def main():
                 "pseudo_perplexity": ppl_mut,
                 "n_mut_positions": len(mut_positions),
                 "llr_vs_wt": llr,
-                "mut_positions": ",".join(str(i) for i in mut_positions)
+                "mut_positions": ";".join(str(i) for i in mut_positions)
             })
 
     for base_id, mut_list in mut_map.items():
@@ -343,6 +283,7 @@ def main():
             rows.append({
                 "base_id": base_id,
                 "variant_id": mut_vid,
+                "sequence": mut_seq,
                 "is_wt": 0,
                 "length": len(mut_seq),
                 "log_pseudo_likelihood": pll_mut,
@@ -353,19 +294,32 @@ def main():
                 "mut_positions": ""
             })
 
-    out_tsv = OUTDIR / "esm2_scores.tsv"
-    with open(out_tsv, "w") as f:
-        header = [
-            "base_id", "variant_id", "is_wt", "length",
-            "log_pseudo_likelihood", "avg_log_prob", "pseudo_perplexity",
-            "n_mut_positions", "llr_vs_wt", "mut_positions"
-        ]
-        f.write("\t".join(header) + "\n")
-        for row in rows:
-            f.write("\t".join(str(row[h]) for h in header) + "\n")
+    out_csv = OUTDIR / "esm2_scores.csv"
+    csv_header = [
+        "base_id",
+        "variant_id",
+        "sequence",
+        "is_wt",
+        "length",
+        "log_pseudo_likelihood",
+        "avg_log_prob",
+        "pseudo_perplexity",
+        "n_mut_positions",
+        "llr_vs_wt",
+        "mut_positions",
+    ]
 
-    print(f"\nDone. Scores written to: {out_tsv}")
-    print(f"Embeddings saved to: {EMB_DIR}")
+    with open(out_csv, "w") as f:
+        f.write(",".join(csv_header) + "\n")
+        for row in rows:
+            f.write(",".join(str(row[h]) for h in csv_header) + "\n")
+
+    print("\nDone.")
+    print(f"Scores (CSV) written to: {out_csv}")
+    t1 = time.perf_counter()
+    elapsed = t1 - t0
+    minutes, seconds = divmod(elapsed, 60)
+    print(f"Total runtime: {elapsed:.2f} s (~{int(minutes)} min {seconds:4.1f} s)")
 
 if __name__ == "__main__":
     main()
