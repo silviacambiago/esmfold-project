@@ -146,3 +146,129 @@ Mean pLDDT: XX.XX
 
 If that works, everything else should work, too. 
 
+# Run predict_cluster.py
+
+This tool folds all FASTA files in a directory using Meta’s ESMFold model and produces:
+
+- One PDB structure per sequence
+- A summary.tsv file including sequence length and mean pLDDT confidence score
+
+## Prepare input FASTA files
+
+Place one or more protein sequences in a directory __fasta_files__. Each file must contain exactly one sequence. 
+
+## Run folding
+
+```bash
+python predict_cluster.py \
+    --fasta-dir fasta_files \
+    --outdir runs/my_protein \
+    --device cuda \
+    --chunk-size 128
+```
+
+After execution, the folder looks like:
+
+```bash
+runs/my_protein/
+    protein1.pdb
+    protein2.pdb
+    ...
+    summary.tsv
+```
+
+# Run ESM2 Analysis
+
+This script runs ESM2-based analysis on wild-type and mutant protein sequences.
+
+For each sequence, it computes:
+- Pseudo Log-Likelihood (PLL)
+- Average log-probability per residue (avg_log_prob / avPLL)
+- Pseudo-perplexity
+- Log-Likelihood Ratio vs WT (LLR) for mutated positions only
+- Number and positions of mutations
+
+All results are written to a single CSV file:
+
+```bash
+esm2_scores.csv
+```
+## FASTA naming conventions
+
+- All FASTA files must contain exactly one sequence.
+- WTs must end with ___wt.fasta__. 
+- Mutants must share the same base_id as their WT (es. __insulin_human__ base-id, __insulin_human_mut1_15_A.fasta__ mutant)
+- Define a folder (es. __esm2_fasta__) where to put all the FASTAs and a directory for the results (es. __runs__).
+
+Recommended directory structure:
+
+```bash
+esmfold-project/
+│
+├── esm2_fasta/
+│   ├── insulin_human_wt.fasta
+│   ├── insulin_human_mut1_...
+│   ├── insulin_bovin_wt.fasta
+│   └── ...
+│
+├── esm2_analysis_cluster.py
+└── runs/
+```
+## Run the script
+
+From the project root
+
+```bash
+python score_cluster.py \
+    --fasta-dir esm2_fasta \
+    --outdir runs/esm2_insulin \
+    --model esm2_t33_650M_UR50D \
+    --device cuda
+```
+
+For a more accurate but slower model:
+
+```bash
+--model esm2_t36_3B_UR50D
+```
+
+After completion, the output directory contains:
+
+```bash
+runs/esm2_insulin/
+└── esm2_scores.csv
+```
+
+## Output column description
+
+| Column | Description |
+|------|-------------|
+| `base_id` | Protein family / reference identifier shared by WT and mutants |
+| `variant_id` | Unique sequence ID (from FASTA filename) |
+| `sequence` | Amino acid sequence |
+| `is_wt` | `1` = wild type, `0` = mutant |
+| `length` | Sequence length (amino acids) |
+| `log_pseudo_likelihood` | Total pseudo log-likelihood under ESM2 |
+| `avg_log_prob` | Mean log-probability per residue (avPLL) |
+| `pseudo_perplexity` | `exp(-avg_log_prob)` |
+| `n_mut_positions` | Number of mutations vs WT |
+| `llr_vs_wt` | Log-likelihood ratio vs WT at mutated sites |
+| `mut_positions` | Mutated positions (0-based, `;`-separated) |
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
