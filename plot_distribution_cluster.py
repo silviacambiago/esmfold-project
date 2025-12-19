@@ -1,33 +1,30 @@
-#!/usr/bin/env python3
-"""
-Plotting script for ESM2 scores (HPC Cluster Friendly).
-Functionally identical to the local version, but adds CLI args and headless backend.
-"""
-
 import argparse
-import sys
 from pathlib import Path
 
 import matplotlib
 matplotlib.use("Agg")
 
-import matplotlib.pyplot as plt
 import pandas as pd
+import matplotlib.pyplot as plt
 import seaborn as sns
 
+BINS = 40
 
-def find_wt_metric(df, metric_col, wt_flag_col="is_wt"):
-    if wt_flag_col in df.columns:
+def find_wt_metric(df, metric_col, wt_id=None, wt_flag_col="is_wt"):
+    if wt_id is not None and "variant_id" in df.columns:
+        wt_row = df.loc[df["variant_id"].astype(str) == str(wt_id)]
+        if not wt_row.empty:
+            return float(wt_row.iloc[0][metric_col])
+
+    if wt_flag_col is not None and wt_flag_col in df.columns:
         wt_row = df.loc[df[wt_flag_col] == 1]
         if len(wt_row) == 1:
             return float(wt_row.iloc[0][metric_col])
+
     return None
 
-
-def plot_step(values, step, metric_col, wt_metric=None, outfile=None):
-    values = pd.to_numeric(values, errors="coerce").dropna().astype(float)
-    if len(values) == 0:
-        return
+def plot_hist(values, metric_col, title, wt_metric=None, outfile=None, invert_x=True):
+    values = values.astype(float)
 
     min_val = float(values.min())
     max_val = float(values.max())
@@ -39,18 +36,19 @@ def plot_step(values, step, metric_col, wt_metric=None, outfile=None):
     sns.histplot(
         values,
         kde=True,
-        bins=40,
+        bins=BINS,
         edgecolor="black",
         alpha=0.85,
     )
 
     plt.xlabel(metric_col)
     plt.ylabel("Count")
-    plt.title(f"Distribution of {metric_col} — step={step}")
+    plt.title(title)
 
     plt.xlim(min_val - pad, max_val + pad)
+    if invert_x:
+        plt.gca().invert_xaxis()
     plt.ylim(bottom=0)
-    plt.gca().invert_xaxis()
 
     if wt_metric is not None:
         plt.axvline(wt_metric, color="red", linestyle="--", linewidth=1.5, label="WT metric")
@@ -58,56 +56,65 @@ def plot_step(values, step, metric_col, wt_metric=None, outfile=None):
 
     plt.tight_layout()
 
-    if outfile:
+    if outfile is not None:
         plt.savefig(outfile, dpi=300)
-        print(f"Saved: {outfile}")
 
     plt.close()
 
-
 def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--input", type=str, required=True, help="Path to csv")
-    parser.add_argument("--outdir", type=str, required=True, help="Output folder")
-    parser.add_argument("--metric", type=str, default="avg_log_prob", help="Metric column")
-    args = parser.parse_args()
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--input", required=True, help="Path to esm2_scores.csv")
+    ap.add_argument("--outdir", required=True, help="Output directory for PNGs")
+    ap.add_argument("--metric", default="avg_log_prob", help="Metric column to plot")
+    ap.add_argument("--step-col", default="n_mut_positions", help="Step column")
+    ap.add_argument("--wt-id", default=None, help="WT variant_id (optional)")
+    ap.add_argument("--wt-flag-col", default="is_wt", help="WT flag column (default: is_wt)")
+    ap.add_argument("--no-invert-x", action="store_true", help="Do not invert x-axis")
+    args = ap.parse_args()
 
     csv_path = Path(args.input)
     outdir = Path(args.outdir)
     metric_col = args.metric
-    step_col = "n_mut_positions"
+    step_col = args.step_col
+    invert_x = not args.no_invert_x
 
     if not csv_path.exists():
-        sys.exit(f"File not found: {csv_path}")
+        raise FileNotFoundError(f"File not found: {csv_path}")
 
     outdir.mkdir(parents=True, exist_ok=True)
 
-    print(f"Loading {csv_path}...")
     df = pd.read_csv(csv_path)
 
-    if metric_col not in df.columns:
-        sys.exit(f"Column '{metric_col}' not found.")
+    for col in [metric_col, step_col]:
+        if col not in df.columns:
+            raise ValueError(f"Column '{col}' not found in CSV!")
 
-    if step_col not in df.columns:
-        print(f"'{step_col}' not found. Treating all as step 0.")
-        df[step_col] = 0
+    wt_metric = find_wt_metric(df, metric_col, wt_id=args.wt_id, wt_flag_col=args.wt_flag_col)
 
-    wt_metric = find_wt_metric(df, metric_col)
-    if wt_metric is not None:
-        print(f"WT Metric: {wt_metric:.4f}")
+    vals_all = df[metric_col].astype(float)
+    plot_hist(
+        vals_all,
+        metric_col=metric_col,
+        title=f"Distribution of {metric_col}",
+        wt_metric=wt_metric,
+        outfile=outdir / f"{metric_col}_ALL.png",
+        invert_x=invert_x,
+    )
 
-    steps = sorted(pd.to_numeric(df[step_col], errors="coerce").dropna().unique())
-
+    steps = sorted(df[step_col].dropna().unique())
     for step in steps:
-        sub_df = df[df[step_col] == step]
-        if sub_df.empty:
+        sub = df[df[step_col] == step]
+        if sub.empty:
             continue
-
-        vals = sub_df[metric_col]
-        out_name = outdir / f"{metric_col}_step{int(step)}.png"
-
-        plot_step(vals, int(step), metric_col, wt_metric, out_name)
-
+        values = sub[metric_col].astype(float)
+        plot_hist(
+            values,
+            metric_col=metric_col,
+            title=f"Distribution of {metric_col} — step={int(step)}",
+            wt_metric=wt_metric,
+            outfile=outdir / f"{metric_col}_step{int(step)}.png",
+            invert_x=invert_x,
+        )
 
 if __name__ == "__main__":
     main()
