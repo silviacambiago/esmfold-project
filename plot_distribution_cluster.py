@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 """
 Plotting script for ESM2 scores (HPC Cluster Friendly).
 Functionally identical to the local version, but adds CLI args and headless backend.
@@ -8,11 +9,12 @@ import sys
 from pathlib import Path
 
 import matplotlib
-matplotlib.use('Agg')
+matplotlib.use("Agg")
 
 import matplotlib.pyplot as plt
 import pandas as pd
 import seaborn as sns
+
 
 def find_wt_metric(df, metric_col, wt_flag_col="is_wt"):
     if wt_flag_col in df.columns:
@@ -21,8 +23,11 @@ def find_wt_metric(df, metric_col, wt_flag_col="is_wt"):
             return float(wt_row.iloc[0][metric_col])
     return None
 
+
 def plot_step(values, step, metric_col, wt_metric=None, outfile=None):
-    values = values.astype(float)
+    values = pd.to_numeric(values, errors="coerce").dropna().astype(float)
+    if len(values) == 0:
+        return
 
     min_val = float(values.min())
     max_val = float(values.max())
@@ -59,6 +64,7 @@ def plot_step(values, step, metric_col, wt_metric=None, outfile=None):
 
     plt.close()
 
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--input", type=str, required=True, help="Path to csv")
@@ -79,29 +85,29 @@ def main():
     print(f"Loading {csv_path}...")
     df = pd.read_csv(csv_path)
 
-    # Basic Checks
     if metric_col not in df.columns:
         sys.exit(f"Column '{metric_col}' not found.")
 
-    # Handle missing step column gracefully
     if step_col not in df.columns:
         print(f"'{step_col}' not found. Treating all as step 0.")
         df[step_col] = 0
 
     wt_metric = find_wt_metric(df, metric_col)
-    if wt_metric:
+    if wt_metric is not None:
         print(f"WT Metric: {wt_metric:.4f}")
 
-    steps = sorted(df[step_col].dropna().unique())
+    steps = sorted(pd.to_numeric(df[step_col], errors="coerce").dropna().unique())
 
     for step in steps:
         sub_df = df[df[step_col] == step]
-        if sub_df.empty: continue
+        if sub_df.empty:
+            continue
 
         vals = sub_df[metric_col]
         out_name = outdir / f"{metric_col}_step{int(step)}.png"
 
         plot_step(vals, int(step), metric_col, wt_metric, out_name)
+
 
 if __name__ == "__main__":
     main()
