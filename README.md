@@ -37,7 +37,7 @@ module load PyTorch/1.10.0-foss-2021a-CUDA-11.3.1
 
 Don't install PyTorch via pip, use this module.
 
-## Step 3 — Create Virtual Environment
+## Step 3 - Create Virtual Environment
 
 ```bash
 python -m venv venv_esmf
@@ -255,8 +255,40 @@ runs/esm2_insulin/
 | `llr_vs_wt` | Log-likelihood ratio vs WT at mutated sites |
 | `mut_positions` | Mutated positions (0-based, `;`-separated) |
 
+ # Plot ESM2 Score Distributions
 
+ The script __plot_distribution_cluster.py__ reads __esm2_scores.csv__ and:
 
+ - Groups sequences by mutation step (__n_mut_positions__)
+ - Plots one histogram per step marking the WT, too, plus one general
+ - Saves all plots as PNG files
+
+ ## Run the script
+
+ From the project root:
+
+```bash
+python plot_distribution_cluster.py \
+    --input runs/esm2_insulin/esm2_scores.csv \
+    --outdir runs/esm2_insulin/plots \
+    --metric avg_log_prob
+```
+
+In general, __--input__ is the path to __esm2_scores.csv__, __--outdir__ is the directory where plots will be saved and __--metric__ is the metric to plot. 
+
+After execution:
+
+```bash
+runs/esm2_insulin/
+├── esm2_scores.csv
+└── plots/
+    ├── avg_log_prob_ALL.png
+    ├── avg_log_prob_step0.png
+    ├── avg_log_prob_step1.png
+    ├── avg_log_prob_step2.png
+    ├── avg_log_prob_step3.png
+    └── ...
+```
 
 
 
