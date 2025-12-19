@@ -2,12 +2,8 @@
 Compute ESM2 embeddings and scores from esm2_analysis output.
 
 Input:
-    - CSV produced by esm2_analysis.py, with columns:
-        base_id, variant_id, sequence, is_wt, length,
-        log_pseudo_likelihood, avg_log_prob, pseudo_perplexity,
-        n_mut_positions, llr_vs_wt, mut_positions
-
-What this script does:
+    - CSV produced by esm2_analysis.py
+This script:
     - Uses one variant as wild-type (by ID or by is_wt==1)
     - Computes Hamming distance to WT for all sequences
     - Defines a functional proxy from an ESM2 metric (avg_log_prob)
@@ -18,7 +14,7 @@ What this script does:
         * compute token-level log-prob score (esm_score)
     - Saves:
         * .npz with embeddings + labels + distances
-        * a human-readable CSV summary with all relevant columns
+        * a CSV summary with all relevant columns
 """
 
 from pathlib import Path
@@ -33,7 +29,6 @@ import esm
 # CSV produced by esm2_analysis.py
 CSV_PATH = "tests/esm2_ubiquitin_multi/esm2_scores.csv"
 
-# variant_id of the WT sequence (as written in esm2_analysis output)
 WT_ID = "ubiquitin_wt"
 
 OUTPUT_NPZ = "esm2_ubiquitin_multi_embeddings.npz"
@@ -42,10 +37,9 @@ SUMMARY_CSV = "ubiquitin_multi_esm2_summary.csv"
 DEVICE = "cuda"
 ESM2_MODEL = "esm2_t36_3B_UR50D"
 
-# column from esm2_analysis to use as ESM-based "fitness-like" metric
 METRIC_COLUMN = "avg_log_prob"
 
-# Fraction of mutants to consider "functional-like" (closest to WT in metric space)
+# Fraction of mutants to consider functional (closest to WT in metric space)
 FUNCTIONAL_FRACTION = 0.7
 
 def compute_hamming_distance(seq, wt):
@@ -54,15 +48,6 @@ def compute_hamming_distance(seq, wt):
 
 
 def load_and_fix_csv(path: str) -> pd.DataFrame:
-    """
-    Load esm2_scores.csv and fix lines that have extra commas in mut_positions.
-
-    Strategy:
-      - Read file as raw text.
-      - Split each line by ','.
-      - If a line has more columns than the header, merge all trailing pieces
-        into the last column (mut_positions) using commas again.
-    """
     text = Path(path).read_text().rstrip("\n")
     lines = text.splitlines()
     if not lines:
@@ -158,7 +143,7 @@ def main():
 
     print(f"\nUsing metric column '{METRIC_COLUMN}' as functional proxy")
     print(f"WT {METRIC_COLUMN}: {wt_metric:.4f}")
-    print(f"FUNCTIONAL_FRACTION (≈ fraction of mutants considered functional): {FUNCTIONAL_FRACTION:.2f}")
+    print(f"FUNCTIONAL_FRACTION: {FUNCTIONAL_FRACTION:.2f}")
     print(f"Δ-threshold (WT_metric - metric): {delta_threshold:.4f}")
     print(f"Functional threshold (metric >=): {functional_threshold:.4f}")
     print(f"Functional sequences: {n_func}")
