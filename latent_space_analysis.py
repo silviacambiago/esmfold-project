@@ -1,47 +1,14 @@
-# -*- coding: utf-8 -*-
-"""
-Latent space analysis for predicted vs ground-truth proteins using ESM-2.
-This script:
-
-1. Reads all FASTA files in fasta_files/
-2. For each FASTA (stem = "protein"):
-       - predicted PDB must be:     tests/myoglobin_runs/protein.pdb
-       - ground truth PDB must be:  ground_truths/protein.pdb
-3. Embeds both predicted & ground-truth sequences using ESM-2
-4. Saves:
-       - embeddings.npy
-       - cosine_similarity.tsv
-       - euclidean_distance.tsv
-       - PCA plot: latent_pca.png
-       - UMAP plot (if available): latent_umap.png
-"""
-
 import os
 import re
 import warnings
 from pathlib import Path
 from typing import List, Tuple, Dict
-
 import numpy as np
 import torch
 import matplotlib.pyplot as plt
-
-# Optional deps
-try:
-    import umap
-    HAS_UMAP = True
-except Exception:
-    HAS_UMAP = False
-
-try:
-    from sklearn.decomposition import PCA
-    HAS_SKLEARN = True
-except Exception:
-    HAS_SKLEARN = False
-
+from sklearn.decomposition import PCA
 import esm
 
-# --------------------- CONFIG -----------------------------
 
 FASTA_DIR = Path("fasta_files")
 PRED_DIR  = Path("tests/myoglobin_runs")
@@ -56,9 +23,6 @@ ESM_LAYER = 33
 
 os.environ['KMP_DUPLICATE_LIB_OK'] = 'TRUE'
 warnings.filterwarnings("ignore", message=".*libomp.dll.*")
-
-
-# --------------------- UTILS ------------------------------
 
 def read_fasta_seq(path: Path) -> str:
     txt = path.read_text().strip()
@@ -77,9 +41,6 @@ def save_matrix_tsv(path: Path, labels: List[str], mat: np.ndarray, header: str)
             row = "\t".join(f"{x:.6f}" for x in mat[i])
             f.write(f"{lab}\t{row}\n")
 
-
-# --------------------- ESM ------------------------------
-
 def load_esm2(model_name=ESM_MODEL, device=None):
     if device is None:
         device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -90,10 +51,6 @@ def load_esm2(model_name=ESM_MODEL, device=None):
     return model, alphabet, batch_converter, device
 
 def embed_sequences_esm2(items, model, alphabet, batch_converter, device, layer=ESM_LAYER):
-    """
-    items: list of (label, fasta_path)
-    returns dict {label: embedding_vector}
-    """
     seq_tuples = []
     for label, path in items:
         seq = read_fasta_seq(path)
@@ -116,9 +73,6 @@ def embed_sequences_esm2(items, model, alphabet, batch_converter, device, layer=
 
     return name_to_vec
 
-
-# ---------------- DISTANCES -------------------------
-
 def pairwise_cosine(X):
     eps = 1e-12
     norms = np.linalg.norm(X, axis=1, keepdims=True)
@@ -131,24 +85,8 @@ def pairwise_euclidean(X):
     D2[D2 < 0] = 0.0
     return np.sqrt(D2)
 
-
-# ---------------- PCA / UMAP -------------------------
-
 def pca_reduce(X, n=2):
-    if HAS_SKLEARN:
-        return PCA(n_components=n).fit_transform(X)
-    Xc = X - X.mean(0)
-    U, S, Vt = np.linalg.svd(Xc, full_matrices=False)
-    return Xc @ Vt[:n].T
-
-def umap_reduce(X, n=2):
-    if not HAS_UMAP:
-        return None
-    reducer = umap.UMAP(n_components=n)
-    return reducer.fit_transform(X)
-
-
-# ---------------- PLOTTING ---------------------------
+    return PCA(n_components=n).fit_transform(X)
 
 def scatter_plot(Z, names, groups, out_png, title):
     import numpy as np
@@ -161,10 +99,8 @@ def scatter_plot(Z, names, groups, out_png, title):
         "gt":   {"marker": "s", "color": "red",   "label": "Ground Truth"},
     }
 
-    # small jitter for predicted just for visualization (purely cosmetic!)
     jitter_scale = 0.03
 
-    # IMPORTANT: draw GT first, then Pred so blue circles are visible
     for grp in ["gt", "pred"]:
         idx = [i for i, g in enumerate(groups) if g == grp]
         if not idx:
@@ -174,7 +110,6 @@ def scatter_plot(Z, names, groups, out_png, title):
         ys_g = ys[idx].copy()
 
         if grp == "pred":
-            # tiny random shift so points aren't exactly on top of GT
             rng = np.random.default_rng(0)
             xs_g += rng.normal(scale=jitter_scale, size=len(xs_g))
             ys_g += rng.normal(scale=jitter_scale, size=len(ys_g))
@@ -194,19 +129,12 @@ def scatter_plot(Z, names, groups, out_png, title):
     plt.savefig(out_png)
     plt.close()
 
-
-
-# ---------------- MAIN ------------------------------
-
 def main():
 
-    # Load all FASTA files from fasta_files/
     fasta_files = sorted(FASTA_DIR.glob("*.fasta"))
     if not fasta_files:
         raise RuntimeError("fasta_files/ is empty!")
 
-    # Build predicted + ground-truth items
-    # For each FASTA file "protein.fasta" → labels: "protein_pred" + "protein_gt"
     items = []
     names = []
     groups = []
@@ -217,8 +145,8 @@ def main():
         pred_label = f"{stem}_pred"
         gt_label   = f"{stem}_gt"
 
-        items.append((pred_label, fa))    # predicted seq comes from FASTA too
-        items.append((gt_label, fa))      # GT uses same seq (latent only)
+        items.append((pred_label, fa))
+        items.append((gt_label, fa))
 
         names.append(stem)
         groups.append("pred")
@@ -233,7 +161,6 @@ def main():
     print("Embedding sequences…")
     name_to_vec = embed_sequences_esm2(items, model, alphabet, batch_converter, device)
 
-    # Build matrix X in same order as items
     labels_in_order = [lbl for (lbl,_) in items]
     X = np.stack([name_to_vec[lbl] for lbl in labels_in_order])
     np.save(OUTDIR / "embeddings.npy", X)
@@ -250,15 +177,7 @@ def main():
     print("Running PCA…")
     Zp = pca_reduce(X, 2)
     scatter_plot(Zp, names, groups, OUTDIR / "latent_pca.png",
-                 "ESM-2 latent space (PCA): Predicted vs Ground Truth")
-
-    if HAS_UMAP:
-        print("Running UMAP…")
-        Zu = umap_reduce(X, 2)
-        scatter_plot(Zu, names, groups, OUTDIR / "latent_umap.png",
-                     "ESM-2 latent space (UMAP): Predicted vs Ground Truth")
-    else:
-        print("UMAP not installed; skipping.")
+                 "ESMFold latent space (PCA): Predicted vs Ground Truth")
 
     print("\nDone.")
     print(f"Saved PCA plot: {OUTDIR/'latent_pca.png'}")

@@ -52,7 +52,6 @@ def main():
     records = []
     seqs = OrderedDict()
 
-    # Predict each FASTA
     for fa in FASTA_FILES:
         name = Path(fa).stem
         seq = read_fasta_one(fa)
@@ -66,7 +65,6 @@ def main():
         write_text(pdb_path, pdb_str)
         print(f"  Saved to {pdb_path}")
 
-        # Per-protein metric: mean pLDDT
         plddt_mean = calculate_plddt(pdb_path)
         records.append((name, len(seq), plddt_mean, str(pdb_path)))
 

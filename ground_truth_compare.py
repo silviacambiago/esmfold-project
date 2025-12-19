@@ -9,7 +9,6 @@ FASTA_DIR = Path("fasta_files")
 PRED_DIR  = Path("tests/myoglobin_runs")
 GT_DIR    = Path("ground_truths")
 
-# 3-letter -> 1-letter map (extend if needed)
 AA3_TO_1 = {
     "ALA":"A","ARG":"R","ASN":"N","ASP":"D","CYS":"C","GLN":"Q","GLU":"E","GLY":"G",
     "HIS":"H","ILE":"I","LEU":"L","LYS":"K","MET":"M","PHE":"F","PRO":"P","SER":"S",
@@ -17,17 +16,12 @@ AA3_TO_1 = {
 }
 
 def _pdb_seqres_sequences(pdb_path: Union[str, Path]) -> Dict[str, str]:
-    """
-    Parse SEQRES records from a PDB (legacy .pdb) file.
-    Returns {chain_id: one_letter_seq}. If no SEQRES present, returns {}.
-    """
     chain_to_aa3: Dict[str, List[str]] = {}
     with open(pdb_path, "r") as f:
         for line in f:
             if not line.startswith("SEQRES"):
                 continue
             chain_id = line[11].strip()
-            # residue names at cols (per PDB format) 20-70, groups of up to 13
             parts = line[19:].split()
             if chain_id not in chain_to_aa3:
                 chain_to_aa3[chain_id] = []
@@ -40,19 +34,14 @@ def _pdb_seqres_sequences(pdb_path: Union[str, Path]) -> Dict[str, str]:
     return out
 
 def _pdb_atom_sequence(pdb_path: Union[str, Path], chain_id: str) -> str:
-    """
-    Sequence from ATOM records (observed residues only).
-    """
     s = PDBParser(QUIET=True).get_structure("x", str(pdb_path))
     m = next(s.get_models())
     ch = m[chain_id]
     one = []
     seen_res_ids = set()
     for res in ch:
-        # skip HETATM / waters / ligands
         if res.id[0] != " ":
             continue
-        # avoid double-counting insertion codes/altlocs
         rid = (res.id[1], res.id[2])
         if rid in seen_res_ids:
             continue
@@ -67,12 +56,6 @@ def _all_chain_ids(pdb_path: Union[str, Path]) -> List[str]:
     return [ch.id for ch in m.get_chains()]
 
 def _align_stats(q: str, t: str):
-    """
-    Align q (FASTA) to t (target chain seq) and compute:
-    identity_pct over aligned non-gaps, coverage over min(len(q), len(t)),
-    plus alignment strings.
-    Uses a slightly stricter scoring than globalxx to discourage silly matches.
-    """
     if not q or not t:
         return None
     aln = pairwise2.align.globalms(q, t, 2, -1, -5, -1, one_alignment_only=True)
@@ -93,18 +76,8 @@ def best_chain_by_identity(
     min_coverage: float = 0.75,
     min_identity: float = 30.0
 ) -> Tuple[str, float, Tuple[str, str, str]]:
-    """
-    Robust selector:
-      1) Try SEQRES (full chain) for each chain; compute identity & coverage.
-      2) If no SEQRES or poor coverage, fall back to ATOM-derived sequence.
-      3) Pick chain maximizing a composite score: ident_pct * coverage.
-      4) Enforce minimum coverage & identity; otherwise return best anyway.
-
-    Returns (chain_id, identity_pct, (aln_fasta, aln_pdb, "")).
-    """
     q = re.sub(r"\s+", "", fasta_seq.upper())
 
-    # Gather candidate sequences
     seqres_map = _pdb_seqres_sequences(pdb_path)  # may be {}
     chain_ids = _all_chain_ids(pdb_path)
 
@@ -113,7 +86,6 @@ def best_chain_by_identity(
     best_passes = False
 
     for cid in chain_ids:
-        # Prefer SEQRES if available; else ATOM
         candidates = []
         if cid in seqres_map and seqres_map[cid]:
             candidates.append(("SEQRES", seqres_map[cid]))
@@ -132,7 +104,6 @@ def best_chain_by_identity(
             score = ident_pct * cov  # composite
 
             passes = (ident_pct >= min_identity and cov >= min_coverage)
-            # prefer passing candidates; otherwise keep best overall
             better = False
             if passes and not best_passes:
                 better = True
@@ -150,7 +121,6 @@ def best_chain_by_identity(
 def coords_from_alignment(pred_pdb: Union[str, Path], gt_pdb: Union[str, Path],
                           chain_pred: str, chain_gt: str,
                           aln_pred: str, aln_gt: str) -> Tuple[np.ndarray, np.ndarray]:
-    """Return matched CA coords using the alignment (skip gaps)."""
     def ca_map(pdb_path, chain_id):
         s = PDBParser(QUIET=True).get_structure("x", str(pdb_path))
         m = next(s.get_models())
@@ -186,12 +156,8 @@ def coords_from_alignment(pred_pdb: Union[str, Path], gt_pdb: Union[str, Path],
 
 def super_rmsd(pred_xyz: np.ndarray, gt_xyz: np.ndarray) -> Tuple[float, np.ndarray, np.ndarray]:
     sup = Superimposer()
-    # Build pseudo-Atom objects is heavy; Superimposer also accepts raw arrays via a hack:
-    # Compute RMSD directly after Kabsch with numpy (simple & stable).
-    # Center
     P = pred_xyz - pred_xyz.mean(0)
     Q = gt_xyz   - gt_xyz.mean(0)
-    # Kabsch
     C = P.T @ Q
     V, S, Wt = np.linalg.svd(C)
     d = np.sign(np.linalg.det(V @ Wt))
@@ -218,16 +184,13 @@ def compare_prediction_to_pdb(fasta_seq: str,
     if not gt_chain or id_pct < 50.0:
         return {"ok": False, "reason": f"No good chain match in GT PDB (best identity {id_pct:.1f}%)."}
 
-    # predicted is single chain "A" from ESMFold
     pred_chain = "A"
 
-    # build coords by alignment
     pred_xyz, gt_xyz = coords_from_alignment(predicted_pdb, ground_truth_pdb,
                                              pred_chain, gt_chain, aln_fa, aln_gt)
     if len(pred_xyz) < 20:
         return {"ok": False, "reason": f"Too few matched residues after alignment: {len(pred_xyz)}."}
 
-    # superimpose & metrics
     rmsd, R, t_gt = super_rmsd(pred_xyz, gt_xyz)
     pred_aln = (pred_xyz - pred_xyz.mean(0)) @ R + t_gt
     tm = tm_score(pred_aln, gt_xyz)
