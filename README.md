@@ -32,10 +32,11 @@ A GPU node (g005, g006, ...) should be available now.
 
 ```bash
 module purge
-module load PyTorch/1.10.0-foss-2021a-CUDA-11.3.1
+module load Python/3.9.5-GCCcore-10.3.0
+module load CUDA/11.3.1
 ```
 
-Don't install PyTorch via pip, use this module.
+Install PyTorch inside the virtual environment to guarantee version compatibility.
 
 ## Step 3 - Create Virtual Environment
 
@@ -59,9 +60,26 @@ The expected output should be:
 
 ## Step 4 - Install Required Python Packages
 
+Upgrade pip:
+
 ```bash
 pip install --upgrade pip
 ```
+
+Install PyTorch (CUDA 11.3 compatible):
+
+```bash
+pip install torch==1.10.2+cu113 torchvision==0.11.3+cu113 --extra-index-url https://download.pytorch.org/whl/cu113
+```
+
+Install NumPy (specifically for OpenFold compatibility):
+
+```bash
+pip install "numpy<1.24"
+```
+
+and the remaining dependencies:
+
 ```bash
 pip install \
   omegaconf==2.3.0 \
@@ -78,10 +96,10 @@ And also install ESM from this link and not from pip:
 pip install "fair-esm @ git+https://github.com/facebookresearch/esm.git@main"
 ```
 
-and OpenFold:
+and OpenFold from GitHub, not PyPI:
 
 ```bash
-pip install openfold==1.0.0
+pip install --no-deps --no-build-isolation "openfold @ git+https://github.com/aqlaboratory/openfold.git@v1.0.0"
 ```
 
 ## Step 5 - Patch OpenFold Utils:
@@ -289,18 +307,3 @@ runs/esm2_insulin/
     ├── avg_log_prob_step3.png
     └── ...
 ```
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
