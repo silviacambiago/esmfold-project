@@ -47,7 +47,7 @@ from scipy.spatial.distance import jensenshannon
 
 
 WT_FASTA            = "insulin_fastas/insulin_human_wt.fasta"
-OUTDIR              = "evolution_walk_v10b"
+OUTDIR              = "evolution_walk_v4"
 
 DEVICE              = "cuda" if torch.cuda.is_available() else "cpu"
 SEED                = 42
@@ -562,7 +562,7 @@ def make_plots(df_traj, df_summ, coupling, all_snapshots, wt, rand_prcs, outdir)
     ax.set_title("PLL trajectory (sampled every 50 steps)")
     ax.grid(alpha=0.3)
 
-    fig.suptitle("V10: Per-residue cosine similarity walk", fontsize=14)
+    fig.suptitle("V4: Per-residue cosine similarity walk", fontsize=14)
     fig.tight_layout()
     fig.savefig(outdir / "plots_walk.png", dpi=150)
     plt.close(fig)
@@ -679,7 +679,7 @@ def make_plots(df_traj, df_summ, coupling, all_snapshots, wt, rand_prcs, outdir)
     ax.set_title("Hamming improvement\n(start − best)")
     ax.grid(alpha=0.3, axis="y")
 
-    fig.suptitle("V10 Final results", fontsize=14)
+    fig.suptitle("V4 Final results", fontsize=14)
     fig.tight_layout()
     fig.savefig(outdir / "plots_final.png", dpi=150)
     plt.close(fig)
