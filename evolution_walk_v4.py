@@ -1,5 +1,5 @@
 """
-Evolution walk v10: Per-residue cosine similarity scoring.
+Evolution walk v4: Per-residue cosine similarity scoring.
 
 
 Replace PLL with per-residue cosine similarity (PRCS):
